@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go-12 Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Applied global box-sizing to prevent padding from causing unexpected overflows */
+        * { box-sizing: border-box; }
+        
+        html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+        body { font-family: 'Inter', sans-serif; overscroll-behavior: none; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #f3f4f6; padding: 0.25rem; }
+        
+        .screen { 
+            width: 100%; 
+            max-width: 500px; 
+            height: 100%;
+            max-height: 800px;
+            margin: auto; 
+            background-color: white; 
+            padding: 1rem; 
+            border-radius: 0.5rem; 
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); 
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+        }
+        .screen.hidden { display: none !important; }
+        .screen h2 { font-size: 1.5rem; margin-bottom: 1rem; color: #374151; flex-shrink: 0; }
+        .screen button { background-color: #3b82f6; color: white; padding: 0.75rem 1.5rem; margin: 0.5rem; border-radius: 0.375rem; font-weight: 600; transition: background-color 0.2s; cursor: pointer; flex-shrink: 0; }
+        .screen button:hover { background-color: #2563eb; }
+
+        #game-container { display: flex; flex-direction: column; flex-grow: 1; min-height: 0; height: 100%; }
+        #game-container h1 { flex-shrink: 0; margin-bottom: 0.25rem; }
+        #board-wrapper { 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            margin: 0.5rem 0; 
+            width: 100%;
+            flex-grow: 1;
+            min-height: 0;
+        }
+        
+        #board { 
+            height: 100%;
+            max-width: 100%;
+            aspect-ratio: 1 / 1;
+            box-shadow: 0 1px 3px 0 rgba(0,0,0,0.1), 0 1px 2px 0 rgba(0,0,0,0.06); 
+            border-radius: 0.125rem; 
+            overflow: hidden; 
+            background-color: #D2B48C; 
+            border: 2px solid #855B32; 
+        }
+
+        .board-grid { display: grid; grid-template-columns: repeat(19, minmax(0, 1fr)); grid-template-rows: repeat(19, minmax(0, 1fr)); position: relative; touch-action: none; width: 100%; height: 100%;}
+        .board-cell { aspect-ratio: 1 / 1; display: flex; justify-content: center; align-items: center; cursor: pointer; position: relative; }
+        /* Drawing the Go board lines */
+        .board-cell::before { content: ""; position: absolute; left: 0; top: 50%; width: 100%; height: 1px; background-color: #000000; transform: translateY(-0.5px); z-index: 0; }
+        .board-cell::after { content: ""; position: absolute; top: 0; left: 50%; width: 1px; height: 100%; background-color: #000000; transform: translateX(-0.5px); z-index: 0; }
+        .board-cell.edge-top::after { top: 50%; height: 50%; } .board-cell.edge-bottom::after { height: 50%; }
+        .board-cell.edge-left::before { left: 50%; width: 50%; } .board-cell.edge-right::before { width: 50%; }
+        .board-cell.edge-top.edge-left::before { left: 50%; width: 50%; } .board-cell.edge-top.edge-left::after { top: 50%; height: 50%; }
+        .board-cell.edge-top.edge-right::before { width: 50%; } .board-cell.edge-top.edge-right::after { top: 50%; height: 50%; }
+        .board-cell.edge-bottom.edge-left::before { left: 50%; width: 50%; } .board-cell.edge-bottom.edge-left::after { height: 50%; }
+        .board-cell.edge-bottom.edge-right::before { width: 50%; } .board-cell.edge-bottom.edge-right::after { height: 50%; }
+        
+        .star-point { width: 25%; height: 25%; background-color: #000000; border-radius: 50%; position: absolute; z-index: 0; }
+        .stone { width: 75%; height: 75%; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.2), inset 0 0.5px 0.5px rgba(255,255,255,0.3); position: relative; z-index: 1; transition: transform 0.2s; }
+        .white-stone { background-color: #f8f8f8; border: 1px solid #c0c0c0; } .black-stone { background-color: #1a1a1a; border: 1px solid #000000; }
+        .selected-for-move { outline: 2px solid #3b82f6; outline-offset: 1px; transform: scale(1.1); } 
+        .valid-move-target { background-color: rgba(59, 130, 246, 0.15); border-radius: 50%; }
+        .ai-move-highlight { background-color: rgba(239, 68, 68, 0.3); border-radius: 50%; transition: background-color 0.5s ease-out; }
+
+        #info-panel { margin-bottom: 0.25rem; padding: 0.25rem; flex-shrink: 0; } 
+        #info-panel p, #message { font-size: 0.75rem; line-height: 1.1; margin-bottom: 0.1rem; height: auto; min-height: 1em; }
+        #controls { margin-top: 0.25rem; flex-shrink: 0; } 
+        #controls button { padding: 0.4rem 0.6rem; font-size: 0.8rem; }
+        
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; padding: 0.5rem;}
+        .modal-content { background-color: white; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); text-align: left; max-width: 90%; width: 400px; }
+        .modal-content h2 { font-size: 1.1rem; margin-bottom: 0.5rem; text-align: center;} .modal-content p { font-size: 0.9rem; margin-bottom: 0.5rem;}
+        .modal-content button { font-size: 0.85rem; padding: 0.4rem 0.8rem; display: block; margin: 1rem auto 0;}
+        #ai-analysis-details, #game-log-list { font-size: 0.8rem; max-height: 250px; overflow-y: auto; background-color: #f9fafb; border: 1px solid #e5e7eb; padding: 0.5rem; border-radius: 0.25rem; }
+    </style>
+</head>
+<body>
+    <div id="game-mode-selection-screen" class="screen">
+        <h2>Choose Game Mode</h2>
+        <button id="play-vs-human-btn">Play vs Human</button>
+        <button id="play-vs-ai-btn">Play vs AI (You are White)</button>
+    </div>
+
+    <div id="game-view" class="screen hidden"> 
+        <div id="game-container">
+            <h1 class="text-lg font-bold text-center text-gray-800 mb-1">Go-12</h1>
+            <div id="info-panel" class="bg-blue-50 rounded shadow">
+                <p id="player-turn" class="font-semibold text-blue-700"></p> <p id="game-phase" class="text-blue-600"></p>
+                <p id="stones-moves-left" class="text-blue-600"></p> <p id="message" class="font-medium text-red-600"></p>
+            </div>
+            <div id="board-wrapper"> <div id="board" class="board-grid"></div> </div>
+            <div id="controls" class="flex flex-col space-y-1 sm:flex-row sm:space-y-0 sm:space-x-2">
+                <button id="finish-moves-btn" class="bg-green-500 text-white font-semibold rounded shadow hover:bg-green-600 w-full">Finish Moves</button>
+                <button id="reset-btn" class="bg-red-500 text-white font-semibold rounded shadow hover:bg-red-600 w-full">Reset Game</button>
+            </div>
+        </div>
+        <div id="modal-overlay" class="modal-overlay hidden">
+            <div class="modal-content"> <h2 id="modal-title">Game Over</h2> <p id="modal-message"></p>
+                <div class="flex justify-center space-x-2 mt-4">
+                    <button id="modal-history-btn" class="bg-gray-500 text-white font-semibold rounded shadow hover:bg-gray-600">View Game Log</button>
+                    <button id="modal-close-btn" class="bg-blue-500 text-white font-semibold rounded shadow hover:bg-blue-600">Play Again</button>
+                </div>
+            </div>
+        </div>
+        <div id="ai-analysis-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <h2 id="ai-analysis-title">AI Is Planning Its Turn...</h2>
+                <div id="ai-analysis-details"></div>
+                <p id="ai-analysis-decision" class="font-bold mt-4"></p>
+                <button id="ai-analysis-close-btn" class="bg-blue-500 text-white font-semibold rounded shadow hover:bg-blue-600">Watch AI Move</button>
+            </div>
+        </div>
+        <div id="game-log-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <h2>Game Log</h2>
+                <div id="game-log-list"></div>
+                <button id="game-log-close-btn" class="bg-blue-500 text-white font-semibold rounded shadow hover:bg-blue-600">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- CONSTANTS ---
+            const BOARD_SIZE = 19; const WHITE = 1; const BLACK = 2;
+            const GAME_STATE = { INIT_WHITE_PLACE: 'INIT_WHITE_PLACE', INIT_BLACK_PLACE: 'INIT_BLACK_PLACE', PLACE_STONES: 'PLACE_STONES', MOVE_STONES: 'MOVE_STONES', GAME_OVER: 'GAME_OVER' };
+            const AI_PLAYER_ID = BLACK;
+            const HUMAN_PLAYER_ID = WHITE;
+            const AI_MOVE_DELAY = 500; // ms per move execution
+
+            // --- GAME STATE VARIABLES ---
+            let boardData, currentPlayer, currentGameState, stonesToPlace, stonesPlacedThisTurn, movesRemainingInTurn, selectedStoneForMove = null;
+            let gameMode = 'human_vs_human';
+            let allPotential12sCache = null;
+            let gameHistory = [];
+            let turnCounter = 1;
+
+            // --- DOM ELEMENTS ---
+            const gameModeSelectionScreen = document.getElementById('game-mode-selection-screen');
+            const gameViewDiv = document.getElementById('game-view');
+            const playVsHumanBtn = document.getElementById('play-vs-human-btn');
+            const playVsAiBtn = document.getElementById('play-vs-ai-btn');
+            
+            const boardElement = document.getElementById('board');
+            const playerTurnElement = document.getElementById('player-turn');
+            const gamePhaseElement = document.getElementById('game-phase');
+            const stonesMovesLeftElement = document.getElementById('stones-moves-left');
+            const messageElement = document.getElementById('message');
+            const finishMovesBtn = document.getElementById('finish-moves-btn');
+            const resetBtn = document.getElementById('reset-btn');
+            
+            // Modals
+            const modalOverlay = document.getElementById('modal-overlay');
+            const modalTitleElement = document.getElementById('modal-title');
+            const modalMessageElement = document.getElementById('modal-message');
+            const modalCloseBtn = document.getElementById('modal-close-btn');
+            const modalHistoryBtn = document.getElementById('modal-history-btn');
+            const aiAnalysisModal = document.getElementById('ai-analysis-modal');
+            const aiAnalysisTitle = document.getElementById('ai-analysis-title');
+            const aiAnalysisCloseBtn = document.getElementById('ai-analysis-close-btn');
+            const aiAnalysisDetails = document.getElementById('ai-analysis-details');
+            const aiAnalysisDecision = document.getElementById('ai-analysis-decision');
+            const gameLogModal = document.getElementById('game-log-modal');
+            const gameLogList = document.getElementById('game-log-list');
+            const gameLogCloseBtn = document.getElementById('game-log-close-btn');
+
+            let resolveAiAnalysisModal;
+
+            // --- EVENT LISTENERS ---
+            playVsHumanBtn.addEventListener('click', () => {
+                gameMode = 'human_vs_human';
+                showScreen('game-view');
+                initGame();
+            });
+            playVsAiBtn.addEventListener('click', () => {
+                gameMode = 'human_vs_ai';
+                showScreen('game-view');
+                initGame();
+            });
+            resetBtn.addEventListener('click', () => showScreen('game-mode-selection-screen'));
+            finishMovesBtn.addEventListener('click', () => {
+                if (currentGameState === GAME_STATE.MOVE_STONES) {
+                    gameHistory.push({ turn: turnCounter, player: currentPlayer, type: 'finish' });
+                    selectedStoneForMove = null; 
+                    transitionToNextPlayerTurn(); 
+                }
+            });
+            modalCloseBtn.addEventListener('click', () => {
+                modalOverlay.classList.add('hidden');
+                showScreen('game-mode-selection-screen');
+            });
+            modalHistoryBtn.addEventListener('click', showGameHistory);
+            gameLogCloseBtn.addEventListener('click', () => gameLogModal.classList.add('hidden'));
+            aiAnalysisCloseBtn.addEventListener('click', () => {
+                aiAnalysisModal.classList.add('hidden');
+                if (resolveAiAnalysisModal) { resolveAiAnalysisModal(); }
+            });
+
+            // --- HELPER FUNCTIONS ---
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+            const coordToAlgebraic = (r, c) => {
+                if (r === undefined || c === undefined) return 'N/A';
+                return `${String.fromCharCode('a'.charCodeAt(0) + c)}${BOARD_SIZE - r}`;
+            };
+
+            // --- SCREEN MANAGEMENT ---
+            function showScreen(screenId) {
+                gameModeSelectionScreen.classList.add('hidden');
+                gameViewDiv.classList.add('hidden');
+                const screenToShow = document.getElementById(screenId);
+                if (screenToShow) screenToShow.classList.remove('hidden');
+            }
+
+            // --- INITIALIZATION ---
+            function initGame() {
+                currentGameState = GAME_STATE.INIT_WHITE_PLACE; 
+                modalOverlay.classList.add('hidden');
+                aiAnalysisModal.classList.add('hidden');
+                gameLogModal.classList.add('hidden');
+                
+                boardData = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(0));
+                currentPlayer = WHITE; 
+                stonesToPlace = 2; 
+                stonesPlacedThisTurn = 0; 
+                movesRemainingInTurn = 0; 
+                selectedStoneForMove = null;
+                gameHistory = [];
+                turnCounter = 1;
+                
+                if (!allPotential12sCache) { 
+                    allPotential12sCache = generateAllPotential12s();
+                }
+
+                renderBoard(); 
+                updateUI(); 
+                messageElement.textContent = '';
+                disablePlayerInteraction(false);
+            }
+
+            // --- UI RENDERING ---
+            function renderBoard() { 
+                if (!boardElement) return;
+                boardElement.innerHTML = ''; 
+                const starPointCoords = [3, 9, 15];
+
+                for (let r = 0; r < BOARD_SIZE; r++) { 
+                    for (let c = 0; c < BOARD_SIZE; c++) { 
+                        const cell = document.createElement('div');
+                        cell.className = 'board-cell';
+                        cell.dataset.r = r; cell.dataset.c = c;
+
+                        if (r === 0) cell.classList.add('edge-top');
+                        if (r === BOARD_SIZE - 1) cell.classList.add('edge-bottom');
+                        if (c === 0) cell.classList.add('edge-left');
+                        if (c === BOARD_SIZE - 1) cell.classList.add('edge-right');
+                        
+                        if (starPointCoords.includes(r) && starPointCoords.includes(c)) {
+                            const starPoint = document.createElement('div');
+                            starPoint.className = 'star-point';
+                            cell.appendChild(starPoint);
+                        }
+
+                        cell.addEventListener('click', () => handleCellClick(r, c));
+                        
+                        if (boardData[r][c] !== 0) {
+                            const stone = document.createElement('div');
+                            stone.className = `stone ${boardData[r][c] === WHITE ? 'white-stone' : 'black-stone'}`;
+                            cell.appendChild(stone);
+                            if (selectedStoneForMove && selectedStoneForMove.r === r && selectedStoneForMove.c === c) {
+                                stone.classList.add('selected-for-move');
+                            }
+                        }
+                        
+                        if (selectedStoneForMove && currentGameState === GAME_STATE.MOVE_STONES && boardData[r][c] === 0) {
+                            const { r: sr, c: sc } = selectedStoneForMove; 
+                            const dr = Math.abs(r - sr); const dc = Math.abs(c - sc);
+                            if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) { 
+                                cell.classList.add('valid-move-target'); 
+                            }
+                        }
+                        boardElement.appendChild(cell);
+                    }
+                }
+            }
+
+            function updateUI() { 
+                const whitePlayerDisplay = (gameMode === 'human_vs_ai') ? "You (White)" : "White";
+                const blackPlayerDisplay = (gameMode === 'human_vs_ai') ? "Gemini AI (Black)" : "Black";
+
+                playerTurnElement.textContent = `Turn ${turnCounter} - Player: ${currentPlayer === WHITE ? whitePlayerDisplay : blackPlayerDisplay}`;
+                
+                let phaseText = '', detailText = '';
+                switch (currentGameState) {
+                    case GAME_STATE.INIT_WHITE_PLACE: phaseText = 'Initial Placement'; detailText = `Place ${stonesToPlace - stonesPlacedThisTurn} stone(s)`; break;
+                    case GAME_STATE.INIT_BLACK_PLACE: phaseText = 'Initial Placement'; detailText = `Place ${stonesToPlace - stonesPlacedThisTurn} stone(s)`; break;
+                    case GAME_STATE.PLACE_STONES: phaseText = 'Place Stones'; detailText = `Place ${stonesToPlace - stonesPlacedThisTurn} stone(s)`; break;
+                    case GAME_STATE.MOVE_STONES: phaseText = 'Move Stones'; detailText = `${movesRemainingInTurn} move(s) left. Select a stone or Finish.`; break;
+                    case GAME_STATE.GAME_OVER: phaseText = 'Game Over'; detailText = messageElement.textContent; break;
+                }
+                gamePhaseElement.textContent = `Phase: ${phaseText}`;
+                stonesMovesLeftElement.textContent = detailText;
+                
+                const isHumanMoving = currentGameState === GAME_STATE.MOVE_STONES && !(gameMode === 'human_vs_ai' && currentPlayer === AI_PLAYER_ID);
+                finishMovesBtn.classList.toggle('hidden', !isHumanMoving);
+            }
+
+            // --- GAME FLOW & PLAYER INPUT ---
+            function handleCellClick(r, c) { 
+                if (currentGameState === GAME_STATE.GAME_OVER || (gameMode === 'human_vs_ai' && currentPlayer === AI_PLAYER_ID)) {
+                    return;
+                }
+                messageElement.textContent = '';
+                if (currentGameState === GAME_STATE.INIT_WHITE_PLACE || currentGameState === GAME_STATE.INIT_BLACK_PLACE || currentGameState === GAME_STATE.PLACE_STONES) {
+                    handlePlacement(r, c);
+                } else if (currentGameState === GAME_STATE.MOVE_STONES) {
+                    handleMovement(r, c);
+                }
+            }
+
+            function handlePlacement(r, c) { 
+                if (boardData[r][c] !== 0) { messageElement.textContent = 'That spot is already occupied.'; return; }
+                if (stonesPlacedThisTurn >= stonesToPlace) { messageElement.textContent = 'You have placed all your stones for this turn.'; return; }
+                
+                boardData[r][c] = currentPlayer; 
+                gameHistory.push({ turn: turnCounter, player: currentPlayer, type: 'place', coord: { r, c } });
+                stonesPlacedThisTurn++;
+                
+                if (checkWin(currentPlayer, boardData)) { endGame(currentPlayer); return; }
+
+                if (stonesPlacedThisTurn === stonesToPlace) { 
+                    if (currentGameState === GAME_STATE.INIT_WHITE_PLACE) { 
+                        currentPlayer = BLACK; currentGameState = GAME_STATE.INIT_BLACK_PLACE; 
+                        stonesToPlace = 4; stonesPlacedThisTurn = 0; 
+                    } else if (currentGameState === GAME_STATE.INIT_BLACK_PLACE) { 
+                        currentPlayer = WHITE; currentGameState = GAME_STATE.PLACE_STONES; 
+                        stonesToPlace = 4; stonesPlacedThisTurn = 0;
+                        turnCounter++;
+                    } else if (currentGameState === GAME_STATE.PLACE_STONES) { 
+                        currentGameState = GAME_STATE.MOVE_STONES; 
+                        movesRemainingInTurn = 2;
+                    }
+                    checkAndRunAI();
+                }
+                renderBoard();
+                updateUI(); 
+            }
+
+            function handleMovement(r, c) { 
+                if (movesRemainingInTurn <= 0) { messageElement.textContent = "You have no moves left. Press 'Finish Moves'."; return; }
+                
+                if (selectedStoneForMove === null) {
+                    if (boardData[r][c] === currentPlayer) { 
+                        selectedStoneForMove = { r, c }; 
+                        messageElement.textContent = 'Stone selected. Click an adjacent empty spot to move.';
+                    } else {
+                        messageElement.textContent = 'Select one of your own stones to move.';
+                    }
+                } else { 
+                    const { r: sr, c: sc } = selectedStoneForMove; 
+                    if (r === sr && c === sc) { selectedStoneForMove = null; messageElement.textContent = 'Stone deselected.'; return; }
+                    if (boardData[r][c] !== 0) { messageElement.textContent = 'You can only move to an empty spot.'; selectedStoneForMove = null; return; }
+                    
+                    const dr_abs = Math.abs(r - sr); const dc_abs = Math.abs(c - sc); 
+                    if (!((dr_abs === 1 && dc_abs === 0) || (dr_abs === 0 && dc_abs === 1))) { 
+                        messageElement.textContent = 'Invalid move. You can only move to adjacent spots.'; 
+                        selectedStoneForMove = null; return; 
+                    }
+                    
+                    boardData[r][c] = currentPlayer; boardData[sr][sc] = 0; 
+                    gameHistory.push({ turn: turnCounter, player: currentPlayer, type: 'move', from: { r: sr, c: sc }, to: { r, c } });
+                    movesRemainingInTurn--;
+                    selectedStoneForMove = null;
+                    
+                    if (checkWin(currentPlayer, boardData)) { endGame(currentPlayer); return; }
+
+                    if (movesRemainingInTurn === 0) {
+                        messageElement.textContent = "All moves used. Press 'Finish Moves' to end your turn.";
+                    } else { 
+                        messageElement.textContent = `Move successful. ${movesRemainingInTurn} move(s) left.`; 
+                    }
+                }
+                renderBoard();
+                updateUI();
+            }
+
+            function transitionToNextPlayerTurn() { 
+                messageElement.textContent = '';
+                
+                currentPlayer = (currentPlayer === WHITE) ? BLACK : WHITE;
+                if (currentPlayer === WHITE) {
+                    turnCounter++;
+                }
+                currentGameState = GAME_STATE.PLACE_STONES; 
+                
+                let emptySites = getEmptySpots(boardData).length;
+                if (emptySites === 0 && currentGameState !== GAME_STATE.GAME_OVER) { endGame(null); return; }
+
+                stonesToPlace = Math.min(4, emptySites);
+                stonesPlacedThisTurn = 0; 
+                movesRemainingInTurn = 0; 
+                selectedStoneForMove = null;
+                
+                renderBoard();
+                updateUI(); 
+                
+                checkAndRunAI();
+            }
+
+            // --- WIN/END GAME LOGIC ---
+            function checkWin(player, board) { 
+                for (const pattern of allPotential12sCache) {
+                    if (pattern.coords.every(coord => board[coord.r][coord.c] === player)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            function endGame(winner) { 
+                currentGameState = GAME_STATE.GAME_OVER; 
+                renderBoard(); 
+                updateUI(); 
+                finishMovesBtn.classList.add('hidden');
+                disablePlayerInteraction(true);
+
+                const winnerName = winner === WHITE ? "White" : (winner === BLACK ? (gameMode === 'human_vs_ai' ? "The AI" : "Black") : null);
+                if (winnerName) {
+                    modalTitleElement.textContent = `${winnerName} Wins!`;
+                    modalMessageElement.textContent = `Congratulations, ${winnerName}! You formed a "12".`;
+                    messageElement.textContent = `${winnerName} Wins!`;
+                } else {
+                    modalTitleElement.textContent = 'Draw Game!';
+                    modalMessageElement.textContent = 'The board is full, and no "12" was formed. The game is a draw.';
+                    messageElement.textContent = 'Draw Game!';
+                }
+                modalOverlay.classList.remove('hidden');
+            }
+
+            // --- AI LOGIC ---
+            async function checkAndRunAI() {
+                if (gameMode === 'human_vs_ai' && currentPlayer === AI_PLAYER_ID && currentGameState !== GAME_STATE.GAME_OVER) {
+                    messageElement.textContent = "AI is thinking...";
+                    disablePlayerInteraction(true);
+                    await sleep(100);
+                    await aiPlayTurn();
+                    if (currentGameState !== GAME_STATE.GAME_OVER) {
+                        disablePlayerInteraction(false);
+                    }
+                }
+            }
+
+            async function aiPlayTurn() {
+                const numPlacements = (currentGameState === GAME_STATE.INIT_BLACK_PLACE || currentGameState === GAME_STATE.PLACE_STONES) ? stonesToPlace - stonesPlacedThisTurn : 0;
+                const numMoves = (currentGameState === GAME_STATE.PLACE_STONES || currentGameState === GAME_STATE.INIT_BLACK_PLACE) ? 2 : movesRemainingInTurn;
+
+                const winningSequence = findGuaranteedWinningSequence(numPlacements, numMoves);
+
+                let placements, moves;
+                if (winningSequence) {
+                    placements = winningSequence.placements;
+                    moves = winningSequence.moves;
+                    await showAiAnalysisModal(placements, moves, true);
+                } else {
+                    placements = aiDecidePlacements(numPlacements);
+                    const tempBoardAfterPlacements = JSON.parse(JSON.stringify(boardData));
+                    placements.forEach(p => tempBoardAfterPlacements[p.r][p.c] = AI_PLAYER_ID);
+                    moves = aiDecideMoves(numMoves, tempBoardAfterPlacements);
+                    await showAiAnalysisModal(placements, moves, false);
+                }
+
+                placements.forEach(p => gameHistory.push({ turn: turnCounter, player: AI_PLAYER_ID, type: 'place', coord: p }));
+                moves.forEach(m => gameHistory.push({ turn: turnCounter, player: AI_PLAYER_ID, type: 'move', from: m.from, to: m.to }));
+                if (moves.length < numMoves && currentGameState !== GAME_STATE.INIT_BLACK_PLACE) {
+                    gameHistory.push({ turn: turnCounter, player: AI_PLAYER_ID, type: 'finish' });
+                }
+
+                for (const spot of placements) {
+                    if (currentGameState === GAME_STATE.GAME_OVER) break;
+                    await sleep(AI_MOVE_DELAY);
+                    boardData[spot.r][spot.c] = AI_PLAYER_ID;
+                    stonesPlacedThisTurn++;
+                    highlightMove(spot.r, spot.c);
+                    renderBoard(); updateUI();
+                }
+                
+                if (currentGameState === GAME_STATE.GAME_OVER) return;
+                if (checkWin(AI_PLAYER_ID, boardData)) { endGame(AI_PLAYER_ID); return; }
+
+                if (currentGameState === GAME_STATE.INIT_BLACK_PLACE) {
+                    transitionToNextPlayerTurn(); return;
+                }
+                
+                currentGameState = GAME_STATE.MOVE_STONES;
+                movesRemainingInTurn = numMoves;
+                updateUI();
+
+                for (const move of moves) {
+                    if (currentGameState === GAME_STATE.GAME_OVER) break;
+                    await sleep(AI_MOVE_DELAY);
+                    boardData[move.to.r][move.to.c] = AI_PLAYER_ID;
+                    boardData[move.from.r][move.from.c] = 0;
+                    movesRemainingInTurn--;
+                    highlightMove(move.to.r, move.to.c);
+                    renderBoard(); updateUI();
+                    if (checkWin(AI_PLAYER_ID, boardData)) { endGame(AI_PLAYER_ID); return; }
+                }
+                
+                if (currentGameState !== GAME_STATE.GAME_OVER) {
+                    transitionToNextPlayerTurn();
+                }
+            }
+            
+            function aiDecidePlacements(numToPlace) {
+                // First, check for critical threats and play defensively if needed.
+                const criticalSpots = findCriticalSpots();
+                if (criticalSpots.length > 0) {
+                    let bestDefensiveSpot = null;
+                    let bestScore = -Infinity;
+                    for (const spot of criticalSpots) {
+                        const tempBoard = JSON.parse(JSON.stringify(boardData));
+                        tempBoard[spot.r][spot.c] = AI_PLAYER_ID;
+                        const score = evaluateBoardScore(tempBoard, AI_PLAYER_ID);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestDefensiveSpot = spot;
+                        }
+                    }
+                    
+                    const placements = [bestDefensiveSpot];
+                    if (numToPlace > 1) {
+                        const tempBoard = JSON.parse(JSON.stringify(boardData));
+                        tempBoard[bestDefensiveSpot.r][bestDefensiveSpot.c] = AI_PLAYER_ID;
+                        const remainingPlacements = aiDecidePlacementsNormal(numToPlace - 1, tempBoard);
+                        placements.push(...remainingPlacements);
+                    }
+                    return placements;
+                }
+                // If no threats, play normally.
+                return aiDecidePlacementsNormal(numToPlace, boardData);
+            }
+
+            function aiDecidePlacementsNormal(numToPlace, board) {
+                const placements = [];
+                const tempBoard = JSON.parse(JSON.stringify(board));
+
+                for (let i = 0; i < numToPlace; i++) {
+                    let bestSpot = null;
+                    let bestScore = -Infinity;
+                    const emptySpots = getEmptySpots(tempBoard);
+                    if (emptySpots.length === 0) break;
+
+                    for (const spot of emptySpots) {
+                        tempBoard[spot.r][spot.c] = AI_PLAYER_ID;
+                        const score = evaluateBoardScore(tempBoard, AI_PLAYER_ID);
+                        tempBoard[spot.r][spot.c] = 0;
+
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestSpot = spot;
+                        }
+                    }
+                    if (bestSpot) {
+                        placements.push(bestSpot);
+                        tempBoard[bestSpot.r][bestSpot.c] = AI_PLAYER_ID;
+                    }
+                }
+                return placements;
+            }
+
+            function aiDecideMoves(numToMove, board) {
+                const moves = [];
+                const tempBoard = JSON.parse(JSON.stringify(board));
+
+                for (let i = 0; i < numToMove; i++) {
+                    let bestMove = null;
+                    let bestScore = -Infinity;
+                    const myStones = getPlayerStones(AI_PLAYER_ID, tempBoard);
+                    if (myStones.length === 0) break;
+
+                    for (const from of myStones) {
+                        const validTargets = getAdjacentEmptySpots(from, tempBoard);
+                        for (const to of validTargets) {
+                            tempBoard[to.r][to.c] = AI_PLAYER_ID;
+                            tempBoard[from.r][from.c] = 0;
+                            const score = evaluateBoardScore(tempBoard, AI_PLAYER_ID);
+                            tempBoard[from.r][from.c] = AI_PLAYER_ID;
+                            tempBoard[to.r][to.c] = 0;
+
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestMove = { from, to };
+                            }
+                        }
+                    }
+
+                    if (bestMove) {
+                        moves.push(bestMove);
+                        tempBoard[bestMove.to.r][bestMove.to.c] = AI_PLAYER_ID;
+                        tempBoard[bestMove.from.r][bestMove.from.c] = 0;
+                    } else {
+                        const movableStones = myStones.filter(s => getAdjacentEmptySpots(s, tempBoard).length > 0);
+                        if (movableStones.length > 0) {
+                            const randomStone = movableStones[Math.floor(Math.random() * movableStones.length)];
+                            const randomTargets = getAdjacentEmptySpots(randomStone, tempBoard);
+                            const randomMove = { from: randomStone, to: randomTargets[0]};
+                            moves.push(randomMove);
+                            tempBoard[randomMove.to.r][randomMove.to.c] = AI_PLAYER_ID;
+                            tempBoard[randomMove.from.r][randomMove.from.c] = 0;
+                        }
+                    }
+                }
+                return moves;
+            }
+
+            function evaluateBoardScore(board, player) {
+                const opponent = player === WHITE ? BLACK : WHITE;
+                let playerScore = 0;
+                let opponentScore = 0;
+
+                for (const pattern of allPotential12sCache) {
+                    let pStones = 0, oStones = 0;
+                    for (const coord of pattern.coords) {
+                        if (board[coord.r][coord.c] === player) pStones++;
+                        else if (board[coord.r][coord.c] === opponent) oStones++;
+                    }
+
+                    if (oStones === 0) playerScore += Math.pow(pStones, 3);
+                    if (pStones === 0) opponentScore += Math.pow(oStones, 3);
+                }
+                return playerScore - (opponentScore * 1.5); // Increased defensive weight
+            }
+
+            // --- REFACTORED, NON-FREEZING WINNING SEQUENCE SEARCH ---
+            function findGuaranteedWinningSequence(numPlacements, numMoves) {
+                for (const pattern of allPotential12sCache) {
+                    const analysis = analyzePatternGeneric(pattern.coords, boardData, AI_PLAYER_ID);
+                    
+                    if (analysis.opponentStones === 0 && analysis.emptySpots > 0 && analysis.emptySpots <= numPlacements + numMoves) {
+                        const tempBoard = JSON.parse(JSON.stringify(boardData));
+                        const placements = analysis.emptyCoords.slice(0, numPlacements);
+                        placements.forEach(p => tempBoard[p.r][p.c] = AI_PLAYER_ID);
+                        
+                        const spotsToFillByMoving = analysis.emptyCoords.slice(numPlacements);
+                        const moveSolution = solveMovesForPattern(spotsToFillByMoving, numMoves, tempBoard);
+                        
+                        if (moveSolution) {
+                            const finalBoard = JSON.parse(JSON.stringify(tempBoard));
+                            moveSolution.forEach(move => {
+                                finalBoard[move.to.r][move.to.c] = AI_PLAYER_ID;
+                                finalBoard[move.from.r][move.from.c] = 0;
+                            });
+                            if (checkWin(AI_PLAYER_ID, finalBoard)) {
+                                return { placements, moves: moveSolution };
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
+
+            function solveMovesForPattern(spotsToFill, maxMoves, board) {
+                if (spotsToFill.length === 0) return [];
+                if (maxMoves < spotsToFill.length) return null;
+
+                const tempBoard = JSON.parse(JSON.stringify(board));
+                let availableStones = getPlayerStones(AI_PLAYER_ID, tempBoard);
+                
+                const moves = [];
+                const filledSpots = new Set();
+                const usedStones = new Set();
+
+                for (let i = 0; i < maxMoves; i++) {
+                    if (filledSpots.size === spotsToFill.length) break;
+                    let bestMove = null;
+
+                    for (const stone of availableStones) {
+                        const stoneKey = `${stone.r},${stone.c}`;
+                        if (usedStones.has(stoneKey)) continue;
+
+                        const targets = getAdjacentEmptySpots(stone, tempBoard);
+                        for (const to of targets) {
+                            const toKey = `${to.r},${to.c}`;
+                            const isTargetSpot = spotsToFill.some(s => s.r === to.r && s.c === to.c) && !filledSpots.has(toKey);
+                            if (isTargetSpot) {
+                                bestMove = { from: stone, to: to };
+                                break;
+                            }
+                        }
+                        if (bestMove) break;
+                    }
+
+                    if (bestMove) {
+                        moves.push(bestMove);
+                        const { from, to } = bestMove;
+                        tempBoard[to.r][to.c] = AI_PLAYER_ID;
+                        tempBoard[from.r][from.c] = 0;
+                        usedStones.add(`${from.r},${from.c}`);
+                        filledSpots.add(`${to.r},${to.c}`);
+                        availableStones = getPlayerStones(AI_PLAYER_ID, tempBoard);
+                    } else {
+                        return null;
+                    }
+                }
+                
+                return filledSpots.size === spotsToFill.length ? moves : null;
+            }
+            
+            function findCriticalSpots() {
+                const placementsAvailable = 4;
+                const criticalCoords = new Set();
+
+                for (const pattern of allPotential12sCache) {
+                    const analysis = analyzePatternGeneric(pattern.coords, boardData, HUMAN_PLAYER_ID);
+                    if (analysis.opponentStones === 0 && analysis.myStones > 0 && analysis.myStones + placementsAvailable >= 12) {
+                        analysis.emptyCoords.forEach(coord => criticalCoords.add(JSON.stringify(coord)));
+                    }
+                }
+                return Array.from(criticalCoords).map(s => JSON.parse(s));
+            }
+
+            function analyzePatternGeneric(coords, board, player) {
+                const opponent = player === WHITE ? BLACK : WHITE;
+                let myStones = 0, opponentStones = 0;
+                const emptyCoords = [];
+                for (const coord of coords) {
+                    const piece = board[coord.r][coord.c];
+                    if (piece === player) myStones++;
+                    else if (piece === opponent) opponentStones++;
+                    else emptyCoords.push(coord);
+                }
+                return { myStones, opponentStones, emptySpots: emptyCoords.length, emptyCoords };
+            }
+
+            function getEmptySpots(board) {
+                const spots = [];
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        if (board[r][c] === 0) spots.push({ r, c });
+                    }
+                }
+                return spots;
+            }
+            
+            function getPlayerStones(player, board) {
+                const stones = [];
+                for (let r = 0; r < BOARD_SIZE; r++) {
+                    for (let c = 0; c < BOARD_SIZE; c++) {
+                        if (board[r][c] === player) stones.push({ r, c });
+                    }
+                }
+                return stones;
+            }
+
+            function getAdjacentEmptySpots(coord, board) {
+                const spots = [];
+                const DIRS = [[-1,0],[1,0],[0,-1],[0,1]];
+                for(const [dr, dc] of DIRS) {
+                    const r = coord.r + dr;
+                    const c = coord.c + dc;
+                    if(r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === 0) {
+                        spots.push({r, c});
+                    }
+                }
+                return spots;
+            }
+
+            // --- AI & GAME LOG VISUALIZATION ---
+            async function showAiAnalysisModal(placements, moves, isWinningMove) {
+                return new Promise(resolve => {
+                    resolveAiAnalysisModal = resolve;
+                    let detailsHtml = "";
+                    let decisionText = "";
+
+                    if (isWinningMove) {
+                        aiAnalysisTitle.textContent = "AI Found a Winning Move!";
+                        decisionText = "The AI will now execute a winning sequence.";
+                    } else {
+                        aiAnalysisTitle.textContent = "AI Is Planning Its Turn...";
+                        decisionText = "AI plans its turn based on board score.";
+                    }
+
+                    if (placements && placements.length > 0) {
+                        detailsHtml += `<p><strong>Placements:</strong> ${placements.map(p => coordToAlgebraic(p.r, p.c)).join(', ')}</p>`;
+                    }
+                    if (moves && moves.length > 0) {
+                        detailsHtml += `<p><strong>Moves:</strong> ${moves.map(m => `${coordToAlgebraic(m.from.r, m.from.c)} \u2192 ${coordToAlgebraic(m.to.r, m.to.c)}`).join(', ')}</p>`;
+                    }
+                    
+                    aiAnalysisDetails.innerHTML = detailsHtml || "<p>AI decides to pass its moves.</p>";
+                    aiAnalysisDecision.innerHTML = `<strong>Strategy:</strong> ${decisionText}`;
+                    aiAnalysisModal.classList.remove('hidden');
+                });
+            }
+
+            function showGameHistory() {
+                const turnsData = new Map();
+
+                gameHistory.forEach(action => {
+                    if (!action) return;
+
+                    if (!turnsData.has(action.turn)) {
+                        turnsData.set(action.turn, { white: [], black: [] });
+                    }
+                    const turnEntry = turnsData.get(action.turn);
+                    let actionString = '';
+
+                    if (action.type === 'place') {
+                        actionString = coordToAlgebraic(action.coord.r, action.coord.c);
+                    } else if (action.type === 'move') {
+                        actionString = `${coordToAlgebraic(action.from.r, action.from.c)}\u2192${coordToAlgebraic(action.to.r, action.to.c)}`;
+                    } else {
+                        return;
+                    }
+
+                    if (action.player === WHITE) {
+                        turnEntry.white.push(actionString);
+                    } else if (action.player === BLACK) {
+                        turnEntry.black.push(actionString);
+                    }
+                });
+
+                let html = '<div class="font-mono text-sm">';
+                const sortedTurns = Array.from(turnsData.keys()).sort((a, b) => a - b);
+
+                sortedTurns.forEach(turnNumber => {
+                    const turn = turnsData.get(turnNumber);
+                    const whiteMoves = turn.white.join(', ') || "-";
+                    const blackMoves = turn.black.join(', ') || "-";
+                    html += `<div class="mt-1"><span class="font-bold w-8 inline-block">${turnNumber}.</span> <span class="text-gray-800">${whiteMoves}</span> : <span class="text-gray-600">${blackMoves}</span></div>`;
+                });
+
+                html += '</div>';
+                gameLogList.innerHTML = html;
+                gameLogModal.classList.remove('hidden');
+            }
+
+            function highlightMove(r, c) {
+                const cell = boardElement.querySelector(`[data-r='${r}'][data-c='${c}']`);
+                if(cell) {
+                    cell.classList.add('ai-move-highlight');
+                    setTimeout(() => cell.classList.remove('ai-move-highlight'), 1000);
+                }
+            }
+            
+            function disablePlayerInteraction(disable) {
+                boardElement.style.pointerEvents = disable ? 'none' : 'auto';
+            }
+
+            // --- PATTERN GENERATION (RUNS ONCE) ---
+            function generateAllPotential12s() {
+                const patterns = []; const L = 12; 
+                const RECTS = [{h:4,w:3},{h:3,w:4},{h:2,w:6},{h:6,w:2}];
+                
+                for (let r = 0; r < BOARD_SIZE; r++) { for (let c = 0; c < BOARD_SIZE; c++) {
+                    // Lines
+                    if (c <= BOARD_SIZE - L) { const lineH = []; for (let k = 0; k < L; k++) { lineH.push({r, c: c + k}); } patterns.push({type: 'line', coords: lineH}); }
+                    if (r <= BOARD_SIZE - L) { const lineV = []; for (let k = 0; k < L; k++) { lineV.push({r: r + k, c}); } patterns.push({type: 'line', coords: lineV}); }
+                    if (r <= BOARD_SIZE - L && c <= BOARD_SIZE - L) { const lineD1 = []; for (let k = 0; k < L; k++) { lineD1.push({r: r + k, c: c + k}); } patterns.push({type: 'line', coords: lineD1}); }
+                    if (r <= BOARD_SIZE - L && c >= L - 1) { const lineD2 = []; for (let k = 0; k < L; k++) { lineD2.push({r: r + k, c: c - k}); } patterns.push({type: 'line', coords: lineD2}); }
+                    // Rectangles
+                    for (const rect of RECTS) { if (r <= BOARD_SIZE - rect.h && c <= BOARD_SIZE - rect.w) {
+                        const rectPattern = []; for (let i = 0; i < rect.h; i++) { for (let j = 0; j < rect.w; j++) { rectPattern.push({r: r + i, c: c + j}); } }
+                        patterns.push({type: 'rect', coords: rectPattern});
+                    }}
+                }} 
+                return patterns;
+            }
+
+            // --- STARTUP ---
+            initGame();
+            showScreen('game-mode-selection-screen');
+        });
+    </script>
+</body>
+</html>
