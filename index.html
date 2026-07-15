@@ -224,7 +224,7 @@
             let analysisStepIndex = 0; // Index of how many half-turns are currently applied
             let whatIfReturnState = null; // Saves state to return to after Leave
 
-            // DOM
+            // DOM Lookups
             const screens = { menu: document.getElementById('game-mode-selection-screen'), game: document.getElementById('game-view') };
             const boardElement = document.getElementById('board');
             const ui = { turn: document.getElementById('player-turn'), phase: document.getElementById('game-phase'), left: document.getElementById('stones-moves-left'), msg: document.getElementById('message') };
@@ -235,18 +235,15 @@
                 whatif: document.getElementById('whatif-controls')
             };
 
-            // Main Buttons
             document.getElementById('play-vs-human-btn').addEventListener('click', () => startGame('human_vs_human'));
             document.getElementById('play-vs-ai-btn').addEventListener('click', () => startGame('human_vs_ai'));
             document.getElementById('enter-analysis-btn').addEventListener('click', () => document.getElementById('analysis-load-modal').classList.remove('hidden'));
             
-            // Standard In-Game
             document.getElementById('finish-moves-btn').addEventListener('click', handleFinishMoves);
             document.getElementById('reset-btn').addEventListener('click', returnToMenu);
             document.getElementById('reset-analysis-btn').addEventListener('click', returnToMenu);
             document.getElementById('reset-whatif-btn').addEventListener('click', returnToMenu);
 
-            // Modals
             document.getElementById('modal-close-btn').addEventListener('click', returnToMenu);
             document.getElementById('modal-history-btn').addEventListener('click', showGameHistory);
             document.getElementById('modal-view-board-btn').addEventListener('click', () => document.getElementById('modal-overlay').classList.add('hidden'));
@@ -285,12 +282,10 @@
 
             document.getElementById('btn-what-if').addEventListener('click', () => {
                 const useAI = document.getElementById('chk-ai-whatif').checked;
-                // Save return state
                 whatIfReturnState = { stepIndex: analysisStepIndex };
                 
                 // Convert parsed half-turns up to this point back into standard flat gameHistory
                 gameHistory = buildFlatHistoryFromParsed(analysisStepIndex);
-                turnCounter = Math.floor(analysisStepIndex / 2) + 1;
                 
                 if (useAI) {
                     document.getElementById('whatif-ai-modal').classList.remove('hidden');
@@ -315,22 +310,19 @@
                     analysisStepIndex = whatIfReturnState.stepIndex;
                     whatIfReturnState = null;
                     gameMode = 'analysis';
+                    selectedStoneForMove = null;
                     rebuildBoardFromHistory(analysisStepIndex);
                 }
             });
 
             document.getElementById('btn-whatif-fresh').addEventListener('click', () => {
                 if(whatIfReturnState !== null) {
-                    // Reset back to exactly when they clicked what if
                     analysisStepIndex = whatIfReturnState.stepIndex;
                     gameHistory = buildFlatHistoryFromParsed(analysisStepIndex);
-                    turnCounter = Math.floor(analysisStepIndex / 2) + 1;
+                    rebuildBoardFromHistory(analysisStepIndex);
                     
-                    // Maintain current what_if mode context (either sandbox or AI)
                     if (gameMode === 'what_if_ai') {
-                        // Keep AI settings the same as they were chosen initially
                         resumeTurnState();
-                        checkAndRunAI();
                     } else {
                         enterWhatIfSandbox();
                     }
@@ -414,7 +406,6 @@
                     }
                 }
 
-                // Set superficial UI state for analysis viewer
                 if (limitIndex === 0) {
                     currentPlayer = WHITE; turnCounter = 1;
                     currentGameState = GAME_STATE.INIT_WHITE_PLACE;
@@ -432,6 +423,9 @@
                 ui.phase.textContent = `Step ${limitIndex} of ${parsedHalfTurns.length}`;
                 ui.left.textContent = '';
                 ui.msg.textContent = '';
+                
+                // CRITICAL FIX: Unlock the board in case we returned from a game over state.
+                disablePlayerInteraction(false); 
             }
 
             function enterWhatIfSandbox() {
@@ -441,26 +435,22 @@
 
             function enterWhatIfActiveGame(humanIsNext) {
                 gameMode = 'what_if_ai';
-                // Who is next?
-                const nextPlayerId = (analysisStepIndex % 2 === 0) ? WHITE : BLACK;
-                
                 if (humanIsNext) {
-                    AI_PLAYER_ID = (nextPlayerId === WHITE) ? BLACK : WHITE;
+                    AI_PLAYER_ID = (currentPlayer === WHITE) ? BLACK : WHITE;
                 } else {
-                    AI_PLAYER_ID = nextPlayerId;
+                    AI_PLAYER_ID = currentPlayer;
                 }
                 resumeTurnState();
             }
 
             function resumeTurnState() {
-                // Calculate actual board metrics to resume standard game loop
                 const emptySites = getEmptySpots(boardData).length;
-                if (emptySites === 0) { endGame(null); return; }
+                if (emptySites === 0 && currentGameState !== GAME_STATE.GAME_OVER) { endGame(null); return; }
 
-                if (turnCounter === 1 && currentPlayer === WHITE && getEmptySpots(boardData).length === BOARD_SIZE*BOARD_SIZE) {
+                if (turnCounter === 1 && currentPlayer === WHITE && emptySites === BOARD_SIZE*BOARD_SIZE) {
                     currentGameState = GAME_STATE.INIT_WHITE_PLACE;
                     stonesToPlace = 2;
-                } else if (turnCounter === 1 && currentPlayer === BLACK && getEmptySpots(boardData).length === (BOARD_SIZE*BOARD_SIZE - 2)) {
+                } else if (turnCounter === 1 && currentPlayer === BLACK && emptySites === (BOARD_SIZE*BOARD_SIZE - 2)) {
                     currentGameState = GAME_STATE.INIT_BLACK_PLACE;
                     stonesToPlace = 4;
                 } else {
@@ -476,6 +466,9 @@
                 updateControlVisibility();
                 renderBoard();
                 updateUI();
+                
+                // CRITICAL FIX: Ensure board is unlocked when entering What If sandbox
+                disablePlayerInteraction(false);
                 
                 if (gameMode === 'what_if_ai') { checkAndRunAI(); }
             }
@@ -520,13 +513,12 @@
                     return;
                 }
 
-                // Standard New Game
                 boardData = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(0));
                 currentPlayer = WHITE; currentGameState = GAME_STATE.INIT_WHITE_PLACE; 
                 stonesToPlace = 2; stonesPlacedThisTurn = 0; movesRemainingInTurn = 0; 
                 selectedStoneForMove = null; gameHistory = []; turnCounter = 1;
                 
-                AI_PLAYER_ID = BLACK; // Default
+                AI_PLAYER_ID = BLACK; 
                 renderBoard(); updateUI(); 
                 ui.msg.textContent = '';
                 disablePlayerInteraction(false);
@@ -542,7 +534,10 @@
 
             function handleCellClick(r, c) { 
                 if (currentGameState === GAME_STATE.GAME_OVER || gameMode === 'analysis') return;
-                if (gameMode.includes('vs_ai') && currentPlayer === AI_PLAYER_ID) return;
+                
+                // CRITICAL FIX: Ensure AI lockout respects what_if_ai mode
+                const isAIActive = (gameMode === 'human_vs_ai' || gameMode === 'what_if_ai');
+                if (isAIActive && currentPlayer === AI_PLAYER_ID) return;
                 
                 ui.msg.textContent = '';
                 if (currentGameState === GAME_STATE.INIT_WHITE_PLACE || currentGameState === GAME_STATE.INIT_BLACK_PLACE || currentGameState === GAME_STATE.PLACE_STONES) {
@@ -625,7 +620,8 @@
             }
 
             async function checkAndRunAI() {
-                if (gameMode.includes('vs_ai') && currentPlayer === AI_PLAYER_ID && currentGameState !== GAME_STATE.GAME_OVER) {
+                const isAIActive = (gameMode === 'human_vs_ai' || gameMode === 'what_if_ai');
+                if (isAIActive && currentPlayer === AI_PLAYER_ID && currentGameState !== GAME_STATE.GAME_OVER) {
                     ui.msg.textContent = "AI is thinking...";
                     disablePlayerInteraction(true);
                     await sleep(100);
@@ -755,32 +751,19 @@
                 return moves;
             }
 
-            function findGuaranteedWinningSequence(numPlacements, numMoves) {
+            function evaluateBoardScore(board, player) {
+                const opponent = player === WHITE ? BLACK : WHITE;
+                let pScore = 0, oScore = 0;
                 for (const pattern of allPotential12sCache) {
-                    const analysis = analyzePatternGeneric(pattern.coords, boardData, AI_PLAYER_ID);
-                    if (analysis.opponentStones === 0 && analysis.emptySpots > 0 && analysis.emptySpots <= numPlacements + numMoves) {
-                        const spotsToPlace = Math.min(numPlacements, analysis.emptySpots);
-                        const placementCombos = getCombinations(analysis.emptyCoords, spotsToPlace);
-                        
-                        for (const combo of placementCombos) {
-                            const tempBoard = JSON.parse(JSON.stringify(boardData));
-                            combo.forEach(p => tempBoard[p.r][p.c] = AI_PLAYER_ID);
-                            const moveSolution = searchWinningMoves(tempBoard, pattern.coords, numMoves, [], AI_PLAYER_ID);
-                            
-                            if (moveSolution) {
-                                let finalPlacements = [...combo];
-                                if (finalPlacements.length < numPlacements) {
-                                    const allEmpties = getEmptySpots(tempBoard);
-                                    const moveDestinations = moveSolution.map(m => `${m.to.r},${m.to.c}`);
-                                    const safeEmpties = allEmpties.filter(e => !moveDestinations.includes(`${e.r},${e.c}`));
-                                    finalPlacements.push(...safeEmpties.slice(0, numPlacements - finalPlacements.length));
-                                }
-                                return { placements: finalPlacements, moves: moveSolution };
-                            }
-                        }
+                    let pStones = 0, oStones = 0;
+                    for (const coord of pattern.coords) {
+                        if (board[coord.r][coord.c] === player) pStones++;
+                        else if (board[coord.r][coord.c] === opponent) oStones++;
                     }
+                    if (oStones === 0) pScore += Math.pow(pStones, 3);
+                    if (pStones === 0) oScore += Math.pow(oStones, 3);
                 }
-                return null;
+                return pScore - (oScore * 1.5); 
             }
 
             function searchWinningMoves(board, targetPatternCoords, movesLeft, currentMovesPath, player) {
@@ -809,7 +792,37 @@
                 return null;
             }
 
+            function findGuaranteedWinningSequence(numPlacements, numMoves) {
+                for (const pattern of allPotential12sCache) {
+                    const analysis = analyzePatternGeneric(pattern.coords, boardData, AI_PLAYER_ID);
+                    if (analysis.opponentStones === 0 && analysis.emptySpots > 0 && analysis.emptySpots <= numPlacements + numMoves) {
+                        const spotsToPlace = Math.min(numPlacements, analysis.emptySpots);
+                        const placementCombos = getCombinations(analysis.emptyCoords, spotsToPlace);
+                        
+                        for (const combo of placementCombos) {
+                            const tempBoard = JSON.parse(JSON.stringify(boardData));
+                            combo.forEach(p => tempBoard[p.r][p.c] = AI_PLAYER_ID);
+                            const moveSolution = searchWinningMoves(tempBoard, pattern.coords, numMoves, [], AI_PLAYER_ID);
+                            
+                            if (moveSolution) {
+                                let finalPlacements = [...combo];
+                                if (finalPlacements.length < numPlacements) {
+                                    const remaining = numPlacements - finalPlacements.length;
+                                    const allEmpties = getEmptySpots(tempBoard);
+                                    const moveDestinations = moveSolution.map(m => `${m.to.r},${m.to.c}`);
+                                    const safeEmpties = allEmpties.filter(e => !moveDestinations.includes(`${e.r},${e.c}`));
+                                    finalPlacements.push(...safeEmpties.slice(0, remaining));
+                                }
+                                return { placements: finalPlacements, moves: moveSolution };
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
+
             function findCriticalSpots() {
+                const placementsAvailable = 4;
                 const criticalCoords = new Set();
                 for (const pattern of allPotential12sCache) {
                     const analysis = analyzePatternGeneric(pattern.coords, boardData, HUMAN_PLAYER_ID);
@@ -822,7 +835,7 @@
                             if (pattern.coords.some(pc => Math.abs(pc.r - stone.r) + Math.abs(pc.c - stone.c) === 1)) potentialSlides++;
                         }
                         
-                        if (analysis.myStones + 4 + Math.min(2, potentialSlides) >= 12) {
+                        if (analysis.myStones + placementsAvailable + Math.min(2, potentialSlides) >= 12) {
                             analysis.emptyCoords.forEach(coord => criticalCoords.add(JSON.stringify(coord)));
                         }
                     }
@@ -830,19 +843,13 @@
                 return Array.from(criticalCoords).map(s => JSON.parse(s));
             }
 
-            function evaluateBoardScore(board, player) {
-                const opponent = player === WHITE ? BLACK : WHITE;
-                let pScore = 0, oScore = 0;
-                for (const pattern of allPotential12sCache) {
-                    let pStones = 0, oStones = 0;
-                    for (const coord of pattern.coords) {
-                        if (board[coord.r][coord.c] === player) pStones++;
-                        else if (board[coord.r][coord.c] === opponent) oStones++;
-                    }
-                    if (oStones === 0) pScore += Math.pow(pStones, 3);
-                    if (pStones === 0) oScore += Math.pow(oStones, 3);
-                }
-                return pScore - (oScore * 1.5); 
+            function getCombinations(array, k) {
+                if (k === 0) return [[]];
+                if (array.length === 0) return [];
+                if (k === array.length) return [array];
+                const combosWithFirst = getCombinations(array.slice(1), k - 1).map(c => [array[0], ...c]);
+                const combosWithoutFirst = getCombinations(array.slice(1), k);
+                return [...combosWithFirst, ...combosWithoutFirst];
             }
 
             function analyzePatternGeneric(coords, board, player) {
@@ -872,10 +879,6 @@
                     if(r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE && board[r][c] === 0) spots.push({r, c});
                 }
                 return spots;
-            }
-            function getCombinations(arr, k) {
-                if (k === 0) return [[]]; if (arr.length === 0) return []; if (k === arr.length) return [arr];
-                return [...getCombinations(arr.slice(1), k - 1).map(c => [arr[0], ...c]), ...getCombinations(arr.slice(1), k)];
             }
 
             function renderBoard() { 
@@ -924,7 +927,8 @@
                 }
                 ui.phase.textContent = `Phase: ${pText}`; ui.left.textContent = dText;
                 
-                const isHuman = currentGameState === GAME_STATE.MOVE_STONES && !(gameMode.includes('vs_ai') && currentPlayer === AI_PLAYER_ID);
+                const isAIActive = (gameMode === 'human_vs_ai' || gameMode === 'what_if_ai');
+                const isHuman = currentGameState === GAME_STATE.MOVE_STONES && !(isAIActive && currentPlayer === AI_PLAYER_ID);
                 document.getElementById('finish-moves-btn').classList.toggle('hidden', !isHuman);
                 document.getElementById('btn-whatif-finish').classList.toggle('hidden', !isHuman);
             }
@@ -942,7 +946,7 @@
 
                 if (gameMode === 'analysis') return;
 
-                const winnerName = winner === WHITE ? "White" : (winner === BLACK ? (gameMode.includes('vs_ai') ? "The AI" : "Black") : null);
+                const winnerName = winner === WHITE ? "White" : (winner === BLACK ? ((gameMode === 'human_vs_ai' || gameMode === 'what_if_ai') ? "The AI" : "Black") : null);
                 if (winnerName) {
                     document.getElementById('modal-title').textContent = `${winnerName} Wins!`;
                     document.getElementById('modal-message').textContent = `Congratulations, ${winnerName}! You formed a "12".`;
